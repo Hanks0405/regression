@@ -1,0 +1,117 @@
+
+import pandas as pd
+import numpy as np
+from pycaret.regression import *
+from collections import defaultdict
+import time
+import os
+import pickle
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+import statsmodels.api as sm
+import joblib
+import seaborn as sns
+from matplotlib import pyplot as plt
+import statsmodels.api as sm
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+import matplotlib.pyplot as plt
+import scipy as sp
+
+def make_reg_model(dataframe, y, drop_list, lock_list):
+    dataframe = dataframe.loc[:, dataframe.dtypes != 'object']
+    dataframe_X = dataframe.drop(columns=[y], axis=1)
+
+    if drop_list is None:
+        pass
+    else:
+        for i in drop_list:
+            if i in dataframe_X.columns:
+                dataframe_X = dataframe_X.drop(columns=[i], axis=1)
+            else:
+                pass
+    dataframe_X = dataframe_X.astype(float)
+    dataframe_Y = dataframe[y]
+    dataframe_Y = dataframe_Y.astype(float)
+    print('regression modeling start')
+    print(dataframe_X.columns[dataframe_X.isna().any()].tolist())
+    model = sm.OLS(dataframe_Y, sm.add_constant(dataframe_X)).fit()
+    print(model.summary())
+    p_val = model.pvalues
+    if lock_list == None:
+        pass
+    else:
+        p_val.drop(labels=lock_list, inplace=True)
+    p_val.drop(labels='const', inplace=True, axis=0)
+    print('start with ' + str(len(p_val)) + ' features')
+
+
+    while max(p_val) > 0.1:  # p-value 0.05 초과 하는 인자 전부 날림.
+        
+        dataframe_X = dataframe_X.drop(columns=list(p_val[p_val == np.max(p_val)].index), axis=1)
+        remove = list(p_val[p_val == np.max(p_val)].index)[0]
+        print('removed : ' + remove)
+        model_b = sm.OLS(dataframe_Y, sm.add_constant(dataframe_X)).fit()
+        print(model_b.summary())
+        p_val = model_b.pvalues
+        p_val.drop(labels='const', inplace=True, axis=0)
+        if lock_list == None:
+            pass
+        else:
+            p_val.drop(labels=lock_list, inplace=True, axis=0) 
+        print(str(len(p_val) + 1) + ' dimensions remaining , AIC : ', model_b.aic)
+        if len(p_val)==0:
+            break
+        
+
+    nan_list = p_val.loc[p_val.isna().tolist()].index
+    if len(nan_list)>0:
+        for j in nan_list:
+            print(j)
+            dataframe_X = dataframe_X.drop(columns=[j], axis=1)
+            print(j + ' is removed, ' + str(len(dataframe_X.columns)) + ' features remained')
+    
+    model_b = sm.OLS(dataframe_Y, sm.add_constant(dataframe_X)).fit()
+    p_val = model_b.pvalues
+    print('final # of fetures : ' + str(len(p_val)))
+
+    return model_b, dataframe_X, dataframe_Y, p_val
+
+
+def mluti_colinearity(dataframe):
+    vif = pd.DataFrame()
+    vif['features'] = dataframe.columns
+    vif['vif factor'] = [variance_inflation_factor(dataframe.values, i) for i in range(dataframe.shape[1])]
+    return vif.values
+
+
+def drop_vif(dataframe, vif, thresh=200):
+    new_vif = vif
+    while max(new_vif[:, 1]) > thresh:
+        print(len(dataframe.columns))
+        dataframe = dataframe.drop(dataframe.columns[np.argmax(new_vif[:, 1])], axis=1)
+        new_vif = mluti_colinearity(dataframe)
+
+    return dataframe, new_vif
+
+
+def draw_hist(data, column):
+    ax = data[column].hist(bins=30, color='tomato')
+    ax.set(title=column)
+    ax.figure.savefig(i+'.png')
+    plt.show()
+    
+def draw_scatter(data, target):
+    fig, ax = plt.subplots(3,3,figsize=(16,16), gridspec_kw={'hspace':0.3})
+    for i in range(3):
+        for j in range(3):
+            column_index = i*3 + j
+            if column_index<7:
+                column = data.columns[column_index]
+                sns.regplot(data=data, x=column, y=target, ax=ax[i][j])
+                r, p = sp.stats.pearsonr(data[column], data[target])
+                print(column, r, p)
+            else:
+                pass
+    plt.show()
